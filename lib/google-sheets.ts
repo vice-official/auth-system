@@ -1,97 +1,92 @@
-import { google } from "googleapis"
 import type { User } from "@/types/user"
 
-export async function getGoogleSheetsClient() {
-  const auth = new google.auth.GoogleAuth({
-    credentials: {
-      client_email: process.env.GOOGLE_SHEETS_CLIENT_EMAIL,
-      private_key: process.env.GOOGLE_SHEETS_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-    },
-    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+// базовая функция для обращения к Google Sheets API через fetch
+async function fetchGoogleSheets(
+  range: string,
+  method: "GET" | "POST" | "PUT",
+  body?: any
+) {
+  const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID
+  const apiKey = process.env.GOOGLE_SHEETS_API_KEY
+
+  if (!spreadsheetId || !apiKey)
+    throw new Error("Missing Google Sheets environment variables")
+
+  const urlBase = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`
+
+  const url =
+    method === "POST"
+      ? `${urlBase}:append?valueInputOption=USER_ENTERED&key=${apiKey}`
+      : `${urlBase}?key=${apiKey}`
+
+  const res = await fetch(url, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
   })
 
-  const sheets = google.sheets({ version: "v4", auth })
-  return sheets
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`Google Sheets API error: ${res.status} ${text}`)
+  }
+
+  return await res.json()
 }
 
+// Получить всех пользователей
 export async function getUsers(): Promise<User[]> {
-  const sheets = await getGoogleSheetsClient()
-  const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID
-
   try {
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId,
-      range: "Users!A2:E",
-    })
-
-    const rows = response.data.values || []
-    return rows.map((row) => ({
+    const data = await fetchGoogleSheets("Users!A2:E", "GET")
+    const rows = data.values || []
+    return rows.map((row: string[]) => ({
       id: row[0],
       email: row[1],
       username: row[2],
       password: row[3],
       createdAt: row[4],
     }))
-  } catch (error) {
-    console.error("Error fetching users from Google Sheets:", error)
+  } catch (err) {
+    console.error("Error fetching users:", err)
     return []
   }
 }
 
+// Найти пользователя по email
 export async function findUserByEmail(email: string): Promise<User | undefined> {
   const users = await getUsers()
-  return users.find((user) => user.email === email)
+  return users.find((u) => u.email === email)
 }
 
+// Добавить нового пользователя
 export async function addUser(
   email: string,
   username: string,
-  hashedPassword: string,
+  hashedPassword: string
 ): Promise<Omit<User, "password">> {
-  const sheets = await getGoogleSheetsClient()
-  const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID
-
   const id = Date.now().toString()
   const createdAt = new Date().toISOString()
 
   try {
-    await sheets.spreadsheets.values.append({
-      spreadsheetId,
-      range: "Users!A:E",
-      valueInputOption: "USER_ENTERED",
-      requestBody: {
-        values: [[id, email, username, hashedPassword, createdAt]],
-      },
+    await fetchGoogleSheets("Users!A:E", "POST", {
+      values: [[id, email, username, hashedPassword, createdAt]],
     })
-
     return { id, email, username, createdAt }
-  } catch (error) {
-    console.error("Error adding user to Google Sheets:", error)
+  } catch (err) {
+    console.error("Error adding user:", err)
     throw new Error("Failed to create user")
   }
 }
 
+// Инициализация шапки таблицы
 export async function initializeSheet() {
-  const sheets = await getGoogleSheetsClient()
-  const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID
-
   try {
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId,
-      range: "Users!A1:E1",
-    })
-
-    if (!response.data.values || response.data.values.length === 0) {
-      await sheets.spreadsheets.values.update({
-        spreadsheetId,
-        range: "Users!A1:E1",
-        valueInputOption: "USER_ENTERED",
-        requestBody: {
-          values: [["ID", "Email", "Username", "Password", "Created At"]],
-        },
+    const data = await fetchGoogleSheets("Users!A1:E1", "GET")
+    if (!data.values || data.values.length === 0) {
+      await fetchGoogleSheets("Users!A1:E1", "PUT", {
+        values: [["ID", "Email", "Username", "Password", "Created At"]],
       })
     }
-  } catch (error) {
-    console.error("Error initializing sheet:", error)
+  } catch (err) {
+    console.error("Error initializing sheet:", err)
   }
 }
