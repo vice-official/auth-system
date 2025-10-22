@@ -1,6 +1,6 @@
 "use server"
 
-import bcrypt from "bcryptjs"
+import * as bcrypt from "bcrypt-ts"
 import { findUserByEmail, addUser } from "@/lib/google-sheets"
 import { createSession, deleteSession } from "@/lib/session"
 import { validateEmail, validatePassword, validateUsername } from "@/lib/validation"
